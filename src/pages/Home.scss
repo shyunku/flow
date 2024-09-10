@@ -1,0 +1,43 @@
+.home.page {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+
+  .container {
+    position: absolute;
+    top: 40%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+    .welcome {
+      font-size: 28px;
+      margin-top: 20px;
+      color: rgb(214, 126, 97);
+      font-weight: bold;
+    }
+
+    .buttons {
+      display: flex;
+      flex-direction: column;
+      margin-top: 50px;
+      align-items: center;
+
+      div {
+        margin-bottom: 20px;
+        font-size: 28px;
+        cursor: pointer;
+        color: rgb(158, 158, 158);
+
+        &:hover {
+          // underline
+          text-decoration: underline;
+          color: rgb(189, 150, 136);
+        }
+      }
+    }
+  }
+}

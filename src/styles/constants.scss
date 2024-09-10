@@ -1,0 +1,38 @@
+$main-theme-color: #0a0b0c; // top bar
+$main-bg-color: #121315;
+$left-sidebar-color: #1b1c22;
+
+$std-btn-color: rgb(75, 84, 99);
+$std-btn-label-color: rgb(105, 116, 137);
+
+$std-color: rgb(131, 145, 171);
+$highlight-color: rgb(93, 152, 255);
+
+// top bar
+$top-bar-height: 0px;
+
+// to-do content
+$padding-horizontal: 70px;
+$padding-vertical: 60px;
+
+$ease-out-elastic: cubic-bezier(0, 0.99, 0.57, 1.22);
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-45px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
