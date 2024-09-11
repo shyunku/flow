@@ -9,21 +9,26 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
   const [rtpCapabilities, setRtpCapabilities] = useState(null);
   const [producerTransport, setProducerTransport] = useState(null);
   const [consumerTransport, setConsumerTransport] = useState(null);
-  const [producerId, setProducerId] = useState(null); // 생성된 프로듀서 ID 저장
 
   // producer
   const [stream, setStream] = useState(null);
   const [videoProducer, setVideoProducer] = useState(null);
   const [audioProducer, setAudioProducer] = useState(null);
+  const [videoProducerId, setVideoProducerId] = useState(null);
+  const [audioProducerId, setAudioProducerId] = useState(null);
   const [videoTrack, setVideoTrack] = useState(null);
   const [audioTrack, setAudioTrack] = useState(null);
 
   // consumer
-  const [producerInfo, setProducerInfo] = useState(null);
-  const [consumer, setConsumer] = useState(null);
+  const [videoProducerInfo, setVideoProducerInfo] = useState(null);
+  const [audioProducerInfo, setAudioProducerInfo] = useState(null);
+  const [audioConsumer, setAudioConsumer] = useState(null);
+  const [videoConsumer, setVideoConsumer] = useState(null);
+  const [producing, setProducing] = useState(false);
+  const [consuming, setConsuming] = useState(false);
 
   // Device 로드
-  const loadDevice = async (routerRtpCapabilities) => {
+  const loadDevice = useCallback(async (routerRtpCapabilities) => {
     try {
       const newDevice = new mediasoupClient.Device();
       await newDevice.load({ routerRtpCapabilities });
@@ -32,7 +37,7 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
     } catch (error) {
       console.error("Error loading device:", error);
     }
-  };
+  }, []);
 
   // Transport 생성
   const createTransport = useCallback(
@@ -54,10 +59,12 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
           });
 
           transport.on("produce", ({ kind, rtpParameters }, callback, errback) => {
-            console.log("Producing stream...");
+            console.log(`Producing ${kind} stream...`);
             socket.emit("produce", { sessionId, transportId: transport.id, kind, rtpParameters }, ({ id }) => {
               callback({ id });
-              setProducerId(id); // 생성된 프로듀서 ID 저장
+
+              if (kind === "video") setVideoProducerId(id); // 생성된 프로듀서 ID 저장
+              else if (kind === "audio") setAudioProducerId(id); // 생성된 프로듀서 ID 저장
             });
           });
 
@@ -112,6 +119,7 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
       });
 
       setStream(screenStream);
+      setProducing(true);
 
       // 송신용 트랜스포트 생성
       const sendTransport = await createSendTransport();
@@ -131,7 +139,7 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
         audioProducer = await sendTransport.produce({ track: audioTrack });
         console.log("Screen share audio producer created:", audioProducer);
       } else {
-        console.error("No audio track found for screen share.");
+        console.log("No audio track found for screen share.");
       }
       setAudioProducer(audioProducer);
 
@@ -139,6 +147,7 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
       videoTrack.onended = () => {
         console.log("Screen sharing stopped.");
         videoProducer.close();
+        setProducing(false);
       };
 
       // 수신용 트랜스포트 생성 및 설정 완료 후에만 `consume` 호출
@@ -146,50 +155,8 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
         console.error("Consumer transport is not ready.");
         return;
       }
-
-      // 자신의 스트림 소비
-      // console.log("Consuming own stream with producerId:", producer.id);
-      // const consumer = await consumeStream(consumerTransport, producer.id);
-      // if (consumer) {
-      //   console.log("Consumer detected:", consumer);
-
-      //   // 소비자 트랙을 포함한 새 스트림 생성
-      //   const remoteStream = new MediaStream();
-      //   remoteStream.addTrack(consumer.track);
-
-      //   // 원격 비디오 요소에 스트림 설정
-      //   videoRef.current.srcObject = remoteStream;
-      //   console.log(`Remote video stream added to <video> element:`, remoteStream);
-
-      //   // 원격 비디오가 로딩 완료 후 재생 시도
-      //   videoRef.current.onloadedmetadata = async () => {
-      //     try {
-      //       console.log("Starting remote video playback...");
-      //       await videoRef.current.play();
-      //       console.log("Remote video started playing.");
-      //     } catch (error) {
-      //       console.error("Remote video play error:", error);
-      //     }
-      //   };
-      // }
     } catch (error) {
       console.error("Error starting screen share:", error);
-    }
-  };
-
-  const stopScreenShare = async () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
-
-      console.log("Screen sharing stopped.");
-    }
-
-    if (videoProducer) {
-      videoProducer.close();
-      setVideoProducer(null);
-
-      console.log("Screen share producer closed.");
     }
   };
 
@@ -240,8 +207,9 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
 
                   console.log("Created new consumer:", consumer);
                   await consumer.resume();
-                  console.log("Consumer resumed");
-                  setConsumer(consumer);
+
+                  if (kind === "video") setVideoConsumer(consumer);
+                  else if (kind === "audio") setAudioConsumer(consumer);
                   resolve(consumer);
                 } catch (err) {
                   console.error("Error creating consumer:", err);
@@ -262,19 +230,58 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
     [device, sessionId, socket]
   );
 
+  const finalize = useCallback(() => {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      setStream(null);
+
+      console.log("Screen sharing stopped.");
+    }
+
+    if (videoProducer) {
+      videoProducer.close();
+      setVideoProducer(null);
+
+      console.log("Screen share video producer closed.");
+    }
+
+    if (audioProducer) {
+      audioProducer.close();
+      setAudioProducer(null);
+
+      console.log("Screen share audio producer closed.");
+    }
+
+    if (videoConsumer) {
+      videoConsumer.close();
+      setVideoConsumer(null);
+
+      console.log("Screen share video consumer closed.");
+    }
+
+    if (audioConsumer) {
+      audioConsumer.close();
+      setAudioConsumer(null);
+
+      console.log("Screen share audio consumer closed.");
+    }
+
+    console.log("webrtc finalized.");
+  }, [stream, videoProducer, audioProducer, videoConsumer, audioConsumer]);
+
   useEffect(() => {
     // 저장된 producer info 소비
     if (!consumerTransport) return;
 
-    if (producerInfo) {
-      const { newProducerId, kind } = producerInfo;
+    if (videoProducerInfo) {
+      const { newProducerId, kind } = videoProducerInfo;
       if (!newProducerId || !kind) {
         console.error("Invalid producer information received:", { newProducerId, kind });
         return;
       }
 
       // 본인의 프로듀서 ID와 같으면 소비하지 않음
-      if (newProducerId === producerId) {
+      if (newProducerId === videoProducerId) {
         console.log("Skipping consumption of own stream.");
         return;
       }
@@ -298,33 +305,96 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
         console.log("Received RTP parameters:", rtpParameters);
         const consumer = await consumeStream(consumerTransport, newProducerId); // consumeStream 함수 호출
         if (consumer) {
-          console.log("Consumer created:", consumer);
-          videoRef.current.srcObject = new MediaStream([consumer.track]);
+          console.log("Consumer video  created:", consumer);
+          if (!videoRef.current.srcObject) {
+            videoRef.current.srcObject = new MediaStream();
+          }
+          videoRef.current.srcObject.addTrack(consumer.track);
+          setConsuming(true);
+          consumer.track.onended = () => {
+            console.log("Consumer video track ended.");
+            setConsuming(false);
+          };
         }
       });
     }
-  }, [consumeStream, consumerTransport, producerId, producerInfo, sessionId, socket, videoRef]);
+  }, [consumeStream, consumerTransport, videoProducerId, videoProducerInfo, sessionId, socket, videoRef]);
+
+  useEffect(() => {
+    // 저장된 producer info 소비
+    if (!consumerTransport) return;
+
+    if (audioProducerInfo) {
+      const { newProducerId, kind } = audioProducerInfo;
+      if (!newProducerId || !kind) {
+        console.error("Invalid producer information received:", { newProducerId, kind });
+        return;
+      }
+
+      // 본인의 프로듀서 ID와 같으면 소비하지 않음
+      if (newProducerId === audioProducerId) {
+        console.log("Skipping consumption of own stream.");
+        return;
+      }
+
+      console.log("Requesting RTP parameters for producer:", newProducerId);
+
+      // 서버에 RTP 파라미터 요청
+      socket.emit("consume-rtp-parameters", { sessionId, producerId: newProducerId }, async (response) => {
+        const { error } = response;
+        if (error) {
+          console.error("Error consuming stream:", error);
+          return;
+        }
+
+        const { rtpParameters } = response;
+        if (!rtpParameters) {
+          console.error("RTP Parameters not received.");
+          return;
+        }
+
+        console.log("Received RTP parameters:", rtpParameters);
+        const consumer = await consumeStream(consumerTransport, newProducerId); // consumeStream 함수 호출
+        if (consumer) {
+          console.log("Consumer audio created:", consumer);
+          if (!videoRef.current.srcObject) {
+            videoRef.current.srcObject = new MediaStream();
+          }
+          videoRef.current.srcObject.addTrack(consumer.track);
+        }
+      });
+    }
+  }, [consumeStream, consumerTransport, audioProducerId, audioProducerInfo, sessionId, socket, videoRef]);
 
   useEffect(() => {
     if (!socketConnected) return;
 
-    socket.on("router-rtp-capabilities", (rtpCapabilities) => {
+    const handleRouterRtpCapabilities = (rtpCapabilities) => {
       console.log("Received Router RTP Capabilities:", rtpCapabilities);
       setRtpCapabilities(rtpCapabilities);
       loadDevice(rtpCapabilities);
-    });
+    };
 
-    socket.on("new-producer", async ({ producerId: newProducerId, kind }) => {
+    const handleNewProducer = async ({ producerId: newProducerId, kind }) => {
       console.log(`New producer available: ${newProducerId} [${kind}]`);
 
-      setProducerInfo({ newProducerId, kind });
-    });
+      if (kind === "video") {
+        setVideoProducerInfo({ newProducerId, kind });
+      } else if (kind === "audio") {
+        setAudioProducerInfo({ newProducerId, kind });
+      } else {
+        console.error("Invalid producer kind:", kind);
+      }
+    };
+
+    socket.on("router-rtp-capabilities", handleRouterRtpCapabilities);
+    socket.on("new-producer", handleNewProducer);
 
     return () => {
-      socket.off("router-rtp-capabilities");
-      socket.off("new-producer");
+      socket.off("router-rtp-capabilities", handleRouterRtpCapabilities);
+      socket.off("new-producer", handleNewProducer);
     };
-  }, [consumeStream, consumerTransport, producerId, sessionId, socket, socketConnected, videoRef]);
+  }, [consumeStream, consumerTransport, loadDevice, sessionId, socket, socketConnected, videoRef]);
 
   useEffect(() => {
     // create transports
@@ -332,20 +402,29 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
   }, [createRecvTransport, device]);
 
   useEffect(() => {
-    if (!consumer) return;
-
     try {
-      if (inactive) {
-        consumer.pause();
-        console.log(`Consumer paused: ${consumer?.id}`);
-      } else {
-        consumer.resume();
-        console.log(`Consumer resumed: ${consumer?.id}`);
+      if (audioConsumer) {
+        if (inactive) {
+          audioConsumer.pause();
+          console.log(`Consumer paused: ${audioConsumer?.id}`);
+        } else {
+          audioConsumer.resume();
+          console.log(`Consumer resumed: ${audioConsumer?.id}`);
+        }
+      }
+      if (videoConsumer) {
+        if (inactive) {
+          videoConsumer.pause();
+          console.log(`Consumer paused: ${videoConsumer?.id}`);
+        } else {
+          videoConsumer.resume();
+          console.log(`Consumer resumed: ${videoConsumer?.id}`);
+        }
       }
     } catch (err) {
       console.error(err);
     }
-  }, [consumer, inactive]);
+  }, [audioConsumer, videoConsumer, inactive]);
 
   useEffect(() => {
     if (!videoTrack) return;
@@ -364,7 +443,7 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, con
       });
   }, [constraints?.frameRate, constraints?.height, constraints?.width, videoTrack]);
 
-  return { startScreenShare, stopScreenShare };
+  return { startScreenShare, finalize, producing, consuming };
 };
 
 export default useWebRTC;

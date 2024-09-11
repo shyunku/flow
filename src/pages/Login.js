@@ -46,6 +46,10 @@ const Login = () => {
     }
   };
 
+  const trySignup = async () => {
+    navigate("/signup");
+  };
+
   const goBack = () => {
     navigate(-1);
   };
@@ -69,6 +73,9 @@ const Login = () => {
           />
           <div className="button submit" onClick={tryLogin}>
             로그인
+          </div>
+          <div className="button signup" onClick={trySignup}>
+            계정이 없어?
           </div>
           <div className="button back" onClick={goBack}>
             뒤로 가기

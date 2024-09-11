@@ -9,6 +9,7 @@ import {
   IoHappy,
   IoLink,
   IoPlay,
+  IoPushOutline,
   IoScan,
   IoSendSharp,
   IoSettingsSharp,
@@ -59,21 +60,21 @@ const Session = () => {
   const [muted, setMuted] = useState(false);
   const [volumeHovered, setVolumeHovered] = useState(false);
 
-  const inactive = useMemo(() => isHost, [isHost]);
   const [socket, socketConnected] = useSocket();
-  const { startScreenShare, stopScreenShare } = useWebRTC({
+  const { startScreenShare, finalize, producing, consuming } = useWebRTC({
     socket,
     socketConnected,
     videoRef,
     sessionId: roomId,
-    inactive: inactive,
+    inactive: isHost,
     constraints: videoConstraints,
     volume,
   });
 
   const exit = () => {
+    socket.emit("leaveRoom", roomId);
+    finalize();
     navigate("/");
-    stopScreenShare();
   };
 
   const onChatSend = () => {
@@ -101,7 +102,7 @@ const Session = () => {
 
   const copyLink = () => {
     const domain = window.location.origin;
-    const url = `${domain}/session/watch/${roomId}`;
+    const url = `${domain}/#/session/watch/${roomId}`;
     navigator.clipboard.writeText(url);
     Toast.info("링크 복사됨");
   };
@@ -172,6 +173,19 @@ const Session = () => {
   );
 
   useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      socket.emit("leaveRoom", roomId);
+      finalize();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [finalize, roomId, socket]);
+
+  useEffect(() => {
     if (!socketConnected) return;
 
     const onChat = (chat) => {
@@ -189,14 +203,20 @@ const Session = () => {
       setWatchers((prev) => prev.filter((watcher) => watcher.uid !== uid));
     };
 
+    const onParticipants = (participants) => {
+      setWatchers(participants);
+    };
+
     socket.on("chat", onChat);
     socket.on("userJoined", onJoin);
     socket.on("userLeft", onLeave);
+    socket.on("participants", onParticipants);
 
     return () => {
       socket.off("chat", onChat);
       socket.off("userJoined", onJoin);
       socket.off("userLeft", onLeave);
+      socket.off("participants", onParticipants);
     };
   }, [addChat, socket, socketConnected]);
 
@@ -303,11 +323,19 @@ const Session = () => {
     <div className="session page">
       <div className="stream-area">
         <video ref={videoRef} id="stream_video" autoPlay playsInline muted={isHost} />
-        {inactive && (
+        {isHost && producing ? (
           <div className="idle-overlay">
             <div className="text">스트리머는 리소스 절약을 위해 송출 화면 못봄</div>
           </div>
-        )}
+        ) : isHost && !producing ? (
+          <div className="idle-overlay">
+            <div className="text">아래에서 방송할 창 고르셈</div>
+          </div>
+        ) : !consuming ? (
+          <div className="idle-overlay">
+            <div className="text">방장이 아직 송출 안함 기다리셈</div>
+          </div>
+        ) : null}
       </div>
       <div className={"title-wrapper show-on-focus" + JsxUtil.classByCondition(mouseOnWindow, "show")}>
         <div className="title">방송 제목</div>
@@ -361,7 +389,7 @@ const Session = () => {
         {isHost && (
           <TooltipDiv tooltip={"스크린 공유/창 변경"}>
             <div className="controller big screen-share" onClick={startScreenShare}>
-              <IoPlay />
+              <IoPushOutline />
             </div>
           </TooltipDiv>
         )}
@@ -384,27 +412,29 @@ const Session = () => {
         </TooltipDiv>
       </div>
       <div className={"sub-controllers"}>
-        <div
-          className={"sub-controller volume" + JsxUtil.classByCondition(volumeHovered, "hovered")}
-          onMouseEnter={(e) => setVolumeHovered(true)}
-          onMouseLeave={(e) => setVolumeHovered(false)}
-          onClick={(e) => setMuted((p) => !p)}
-        >
-          {muted ? (
-            <IoVolumeMute />
-          ) : volume > 80 ? (
-            <IoVolumeHigh />
-          ) : volume > 40 ? (
-            <IoVolumeMedium />
-          ) : volume > 0 ? (
-            <IoVolumeLow />
-          ) : (
-            <IoVolumeMute />
-          )}
-          <div className="volume-bar">
-            <VolumeSlider onChange={(v) => setVolume(v)} disabled={muted} />
+        {!isHost && (
+          <div
+            className={"sub-controller volume" + JsxUtil.classByCondition(volumeHovered, "hovered")}
+            onMouseEnter={(e) => setVolumeHovered(true)}
+            onMouseLeave={(e) => setVolumeHovered(false)}
+            onClick={(e) => setMuted((p) => !p)}
+          >
+            {muted ? (
+              <IoVolumeMute />
+            ) : volume > 80 ? (
+              <IoVolumeHigh />
+            ) : volume > 40 ? (
+              <IoVolumeMedium />
+            ) : volume > 0 ? (
+              <IoVolumeLow />
+            ) : (
+              <IoVolumeMute />
+            )}
+            <div className="volume-bar">
+              <VolumeSlider onChange={(v) => setVolume(v)} disabled={muted} />
+            </div>
           </div>
-        </div>
+        )}
         <TooltipDiv tooltip={fullScreenMode ? "창 모드" : "전체 화면"}>
           <div className="sub-controller fullscreen" onClick={toggleScreenMode}>
             <IoScan />

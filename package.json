@@ -1,6 +1,6 @@
 {
   "name": "flow",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "private": true,
   "dependencies": {
     "@reduxjs/toolkit": "2.2.7",

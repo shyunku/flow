@@ -53,6 +53,14 @@
             background-color: rgb(161, 97, 55);
           }
         }
+
+        &.signup {
+          background-color: rgb(66, 52, 86);
+
+          &:hover {
+            background-color: rgb(97, 55, 161);
+          }
+        }
       }
     }
   }
