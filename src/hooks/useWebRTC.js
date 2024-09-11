@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import * as mediasoupClient from "mediasoup-client";
+import Toast from "molecules/Toast";
 
-const useWebRTC = ({ socket, socketConnected, videoRef, sessionId }) => {
+const useWebRTC = ({ socket, socketConnected, videoRef, sessionId, inactive, constraints }) => {
   /** @type {mediasoupClient.Device} */
   const [device, setDevice] = useState(null);
   const [rtpCapabilities, setRtpCapabilities] = useState(null);
@@ -12,10 +13,14 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId }) => {
 
   // producer
   const [stream, setStream] = useState(null);
-  const [producer, setProducer] = useState(null);
+  const [videoProducer, setVideoProducer] = useState(null);
+  const [audioProducer, setAudioProducer] = useState(null);
+  const [videoTrack, setVideoTrack] = useState(null);
+  const [audioTrack, setAudioTrack] = useState(null);
 
   // consumer
   const [producerInfo, setProducerInfo] = useState(null);
+  const [consumer, setConsumer] = useState(null);
 
   // Device 로드
   const loadDevice = async (routerRtpCapabilities) => {
@@ -98,25 +103,42 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId }) => {
     try {
       // 브라우저에서 화면 공유를 위한 미디어 스트림 요청
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true, // 비디오 화면만 공유
-        audio: false, // 오디오 공유 안함 (필요시 true로 설정)
+        video: {
+          width: { ideal: constraints?.width ?? 1920 },
+          height: { ideal: constraints?.height ?? 1080 },
+          frameRate: { ideal: constraints?.frameRate ?? 30, max: 144 },
+        },
+        audio: true,
       });
 
       setStream(screenStream);
 
       // 송신용 트랜스포트 생성
       const sendTransport = await createSendTransport();
-      const track = screenStream.getVideoTracks()[0];
+      const videoTrack = screenStream.getVideoTracks()[0];
+      const audioTrack = screenStream.getAudioTracks()[0];
+
+      setVideoTrack(videoTrack);
+      setAudioTrack(audioTrack);
 
       // 스크린 공유를 위한 프로듀서 생성
-      const producer = await sendTransport.produce({ track });
-      setProducer(producer);
-      console.log("Screen share producer created:", producer);
+      const videoProducer = await sendTransport.produce({ track: videoTrack });
+      setVideoProducer(videoProducer);
+      console.log("Screen share video producer created:", videoProducer);
+
+      let audioProducer = null;
+      if (audioTrack) {
+        audioProducer = await sendTransport.produce({ track: audioTrack });
+        console.log("Screen share audio producer created:", audioProducer);
+      } else {
+        console.error("No audio track found for screen share.");
+      }
+      setAudioProducer(audioProducer);
 
       // 스크린 공유가 중지되면 프로듀서를 닫습니다.
-      track.onended = () => {
+      videoTrack.onended = () => {
         console.log("Screen sharing stopped.");
-        producer.close();
+        videoProducer.close();
       };
 
       // 수신용 트랜스포트 생성 및 설정 완료 후에만 `consume` 호출
@@ -126,32 +148,30 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId }) => {
       }
 
       // 자신의 스트림 소비
-      console.log("Consuming own stream with producerId:", producer.id);
-      const consumer = await consumeStream(consumerTransport, producer.id);
-      if (consumer) {
-        console.log("Consumer detected:", consumer);
+      // console.log("Consuming own stream with producerId:", producer.id);
+      // const consumer = await consumeStream(consumerTransport, producer.id);
+      // if (consumer) {
+      //   console.log("Consumer detected:", consumer);
 
-        setTimeout(() => {
-          // 소비자 트랙을 포함한 새 스트림 생성
-          const remoteStream = new MediaStream();
-          remoteStream.addTrack(consumer.track);
+      //   // 소비자 트랙을 포함한 새 스트림 생성
+      //   const remoteStream = new MediaStream();
+      //   remoteStream.addTrack(consumer.track);
 
-          // 원격 비디오 요소에 스트림 설정
-          videoRef.current.srcObject = remoteStream;
-          console.log(`Remote video stream added to <video> element:`, remoteStream);
+      //   // 원격 비디오 요소에 스트림 설정
+      //   videoRef.current.srcObject = remoteStream;
+      //   console.log(`Remote video stream added to <video> element:`, remoteStream);
 
-          // 원격 비디오가 로딩 완료 후 재생 시도
-          videoRef.current.onloadedmetadata = async () => {
-            try {
-              console.log("Starting remote video playback...");
-              await videoRef.current.play();
-              console.log("Remote video started playing.");
-            } catch (error) {
-              console.error("Remote video play error:", error);
-            }
-          };
-        }, 1000);
-      }
+      //   // 원격 비디오가 로딩 완료 후 재생 시도
+      //   videoRef.current.onloadedmetadata = async () => {
+      //     try {
+      //       console.log("Starting remote video playback...");
+      //       await videoRef.current.play();
+      //       console.log("Remote video started playing.");
+      //     } catch (error) {
+      //       console.error("Remote video play error:", error);
+      //     }
+      //   };
+      // }
     } catch (error) {
       console.error("Error starting screen share:", error);
     }
@@ -165,70 +185,13 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId }) => {
       console.log("Screen sharing stopped.");
     }
 
-    if (producer) {
-      producer.close();
-      setProducer(null);
+    if (videoProducer) {
+      videoProducer.close();
+      setVideoProducer(null);
 
       console.log("Screen share producer closed.");
     }
   };
-
-  // 스트리밍 시작 핸들러
-
-  // const handleStart = async (stream) => {
-  //   if (stream) {
-  //     // 송신용 트랜스포트 생성
-  //     const sendTransport = await createSendTransport();
-  //     const track = stream.getVideoTracks()[0];
-
-  //     // 비디오 프로듀서 생성
-  //     let producer;
-  //     try {
-  //       producer = await sendTransport.produce({ track });
-  //       console.log("Producer created:", producer);
-  //       setProducerId(producer.id); // 생성된 프로듀서 ID 설정
-  //     } catch (error) {
-  //       console.error("Error creating producer:", error); // 오류 로그 추가
-  //       return; // 오류 발생 시 함수 종료
-  //     }
-
-  //     // 수신용 트랜스포트 생성 및 설정 완료 후에만 `consume` 호출
-  //     if (!consumerTransport) {
-  //       console.error("Consumer transport is not ready.");
-  //       return;
-  //     }
-
-  //     // 자신의 스트림 소비
-  //     console.log("Consuming own stream with producerId:", producer.id);
-  //     const consumer = await consumeStream(consumerTransport, producer.id, track.kind, producer.rtpParameters);
-  //     if (consumer) {
-  //       console.log("Consumer detected:", consumer);
-
-  //       setTimeout(() => {
-  //         // 소비자 트랙을 포함한 새 스트림 생성
-  //         const remoteStream = new MediaStream();
-  //         remoteStream.addTrack(consumer.track);
-
-  //         // 원격 비디오 요소에 스트림 설정
-  //         videoRef.current.srcObject = remoteStream;
-  //         console.log(`Remote video stream added to <video> element:`, remoteStream);
-
-  //         // 원격 비디오가 로딩 완료 후 재생 시도
-  //         videoRef.current.onloadedmetadata = async () => {
-  //           try {
-  //             console.log("Starting remote video playback...");
-  //             await videoRef.current.play();
-  //             console.log("Remote video started playing.");
-  //           } catch (error) {
-  //             console.error("Remote video play error:", error);
-  //           }
-  //         };
-  //       }, 1000);
-  //     }
-  //   } else {
-  //     console.error("No video selected to stream.");
-  //   }
-  // };
 
   // 소비자(Consumer) 스트림 생성 함수 추가
   const consumeStream = useCallback(
@@ -252,40 +215,51 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId }) => {
         console.log("Requesting to consume stream from server...", { producerId });
         // 서버에 'consume' 이벤트를 보냄
         return new Promise((resolve, reject) => {
-          socket.emit(
-            "consume",
-            { sessionId, producerId, rtpCapabilities: device.rtpCapabilities },
-            async (response) => {
-              const { id, producerId, kind, rtpParameters, error } = response;
+          try {
+            socket.emit(
+              "consume",
+              { sessionId, producerId, rtpCapabilities: device.rtpCapabilities },
+              async (response) => {
+                const { id, producerId, kind, rtpParameters, error } = response;
 
-              if (error) {
-                console.error("Error consuming stream:", error);
-                resolve(null);
-                return;
+                if (error) {
+                  console.error("Error consuming stream:", error);
+                  resolve(null);
+                  return;
+                }
+
+                console.log("Received consume response:", response);
+
+                try {
+                  const consumer = await transport.consume({
+                    id,
+                    producerId,
+                    kind,
+                    rtpParameters,
+                  });
+
+                  console.log("Created new consumer:", consumer);
+                  await consumer.resume();
+                  console.log("Consumer resumed");
+                  setConsumer(consumer);
+                  resolve(consumer);
+                } catch (err) {
+                  console.error("Error creating consumer:", err);
+                  reject(err);
+                  return;
+                }
               }
-
-              console.log("Received consume response:", response);
-
-              const consumer = await transport.consume({
-                id,
-                producerId,
-                kind,
-                rtpParameters,
-              });
-
-              console.log("Created new consumer:", consumer);
-              await consumer.resume();
-              console.log("Consumer resumed");
-              resolve(consumer);
-            }
-          );
+            );
+          } catch (error) {
+            reject(error);
+          }
         });
       } catch (error) {
         console.error("Error requesting consume:", error);
         return null;
       }
     },
-    [device?.rtpCapabilities, socket]
+    [device, sessionId, socket]
   );
 
   useEffect(() => {
@@ -356,6 +330,39 @@ const useWebRTC = ({ socket, socketConnected, videoRef, sessionId }) => {
     // create transports
     if (device) createRecvTransport();
   }, [createRecvTransport, device]);
+
+  useEffect(() => {
+    if (!consumer) return;
+
+    try {
+      if (inactive) {
+        consumer.pause();
+        console.log(`Consumer paused: ${consumer?.id}`);
+      } else {
+        consumer.resume();
+        console.log(`Consumer resumed: ${consumer?.id}`);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }, [consumer, inactive]);
+
+  useEffect(() => {
+    if (!videoTrack) return;
+    videoTrack
+      .applyConstraints({
+        width: { ideal: constraints?.width ?? 1920 },
+        height: { ideal: constraints?.height ?? 1080 },
+        frameRate: { ideal: constraints?.frameRate ?? 30, max: 144 },
+      })
+      .then(() => {
+        console.log("Screen share constraints applied:", videoTrack.getSettings());
+      })
+      .catch((error) => {
+        console.error("Error applying screen share constraints:", error);
+        Toast.error("방송 설정을 적용하는데 실패함");
+      });
+  }, [constraints?.frameRate, constraints?.height, constraints?.width, videoTrack]);
 
   return { startScreenShare, stopScreenShare };
 };

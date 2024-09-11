@@ -1,7 +1,22 @@
 import { useSelector } from "react-redux";
 import { accountAuthSlice } from "store/accountSlice";
 import "./Session.scss";
-import { IoChatbubbleEllipses, IoChevronForward, IoClose, IoCopy, IoHappy, IoPlay, IoSendSharp } from "react-icons/io5";
+import {
+  IoChatbubbleEllipses,
+  IoChevronForward,
+  IoClose,
+  IoCopy,
+  IoHappy,
+  IoLink,
+  IoPlay,
+  IoScan,
+  IoSendSharp,
+  IoSettingsSharp,
+  IoVolumeHigh,
+  IoVolumeLow,
+  IoVolumeMedium,
+  IoVolumeMute,
+} from "react-icons/io5";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { generateRandomColor } from "utils/Common";
 import Toast from "molecules/Toast";
@@ -11,29 +26,50 @@ import io from "socket.io-client";
 import useSocket from "hooks/useSocket";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import useWebRTC from "hooks/useWebRTC";
+import VideoConstraints from "utils/VideoConstraints";
+import VolumeSlider from "molecules/VolumeSlider";
+import Modal, { Modaler, openModal } from "molecules/Modal";
+import { ModalTypes } from "routers/ModalRouter";
+import { requestPermission } from "utils/Permission";
 
 const Session = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { id: paramRoomId } = useParams();
+  const { id: roomId } = useParams();
   const isHost = location.pathname.includes("/session/host");
-  const [roomId, setRoomId] = useState(paramRoomId);
+  // const [roomId, setRoomId] = useState(paramRoomId);
 
   const inputRef = useRef(null);
   const [chats, setChats] = useState([]);
   const [chatInput, setChatInput] = useState("");
-  const [windowOnFocus, setWindowOnFocus] = useState(true);
+  const [mouseOnWindow, setMouseOnWindow] = useState(true);
+  const [focusOnWindow, setFocusOnWindow] = useState(document.visibilityState === "visible");
   const accountAuth = useSelector(accountAuthSlice);
   const [showChat, setShowChat] = useState(true);
   const [lastSeenChatTime, setLastSeenChatTime] = useState(Date.now());
+  const [watchers, setWatchers] = useState([]);
   const unseenChatCount = useMemo(() => {
     return chats.filter((chat) => chat.time > lastSeenChatTime).length;
   }, [chats, lastSeenChatTime]);
 
   const videoRef = useRef(null);
+  const [videoConstraints, setVideoConstraints] = useState(new VideoConstraints());
+  const [fullScreenMode, setFullScreenMode] = useState(document.fullscreenElement !== null);
+  const [volume, setVolume] = useState(70);
+  const [muted, setMuted] = useState(false);
+  const [volumeHovered, setVolumeHovered] = useState(false);
 
+  const inactive = useMemo(() => isHost, [isHost]);
   const [socket, socketConnected] = useSocket();
-  const { startScreenShare, stopScreenShare } = useWebRTC({ socket, socketConnected, videoRef, sessionId: roomId });
+  const { startScreenShare, stopScreenShare } = useWebRTC({
+    socket,
+    socketConnected,
+    videoRef,
+    sessionId: roomId,
+    inactive: inactive,
+    constraints: videoConstraints,
+    volume,
+  });
 
   const exit = () => {
     navigate("/");
@@ -61,6 +97,46 @@ const Session = () => {
   const copyCode = () => {
     navigator.clipboard.writeText(roomId);
     Toast.info("코드 복사됨");
+  };
+
+  const copyLink = () => {
+    const domain = window.location.origin;
+    const url = `${domain}/session/watch/${roomId}`;
+    navigator.clipboard.writeText(url);
+    Toast.info("링크 복사됨");
+  };
+
+  const floatSettings = () => {
+    openModal(ModalTypes.STREAM_SETTINGS, { videoConstraints }, (result) => {
+      setVideoConstraints(result.videoConstraints);
+    });
+  };
+
+  const toggleScreenMode = () => {
+    setFullScreenMode((prev) => {
+      const isFullScreenMode = !prev;
+
+      const elem = document.documentElement;
+      if (isFullScreenMode) {
+        if (elem.requestFullscreen) {
+          elem.requestFullscreen();
+        } else if (elem.webkitRequestFullscreen) {
+          elem.webkitRequestFullscreen();
+        } else if (elem.msRequestFullscreen) {
+          elem.msRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) {
+          document.msExitFullscreen();
+        }
+      }
+
+      return isFullScreenMode;
+    });
   };
 
   const addChat = useCallback(
@@ -103,10 +179,24 @@ const Session = () => {
       addChat({ uid, nickname, content: message, time: Date.now() });
     };
 
+    const onJoin = ({ uid, nickname }) => {
+      addChat({ uid: "system", nickname: "System", content: `${nickname} 들어옴`, time: Date.now() });
+      setWatchers((prev) => [...prev, { uid, nickname }]);
+    };
+
+    const onLeave = ({ uid, nickname }) => {
+      addChat({ uid: "system", nickname: "System", content: `${nickname} 나감`, time: Date.now() });
+      setWatchers((prev) => prev.filter((watcher) => watcher.uid !== uid));
+    };
+
     socket.on("chat", onChat);
+    socket.on("userJoined", onJoin);
+    socket.on("userLeft", onLeave);
 
     return () => {
       socket.off("chat", onChat);
+      socket.off("userJoined", onJoin);
+      socket.off("userLeft", onLeave);
     };
   }, [addChat, socket, socketConnected]);
 
@@ -126,6 +216,11 @@ const Session = () => {
   }, [navigate, socket, socketConnected]);
 
   useEffect(() => {
+    if (!videoRef.current) return;
+    videoRef.current.volume = muted ? 0 : volume / 100;
+  }, [volume, videoRef, muted]);
+
+  useEffect(() => {
     if (!socketConnected) return;
 
     // authenticate
@@ -139,11 +234,16 @@ const Session = () => {
         // socket join/create room
         if (isHost) {
           // create room
-          socket.emit("createRoom", (roomId) => {
-            console.log("room created", roomId);
-            setRoomId(roomId);
+          if (!roomId) {
+            console.log(`Room id not found, creating new room`, roomId);
+            socket.emit("createRoom", (roomId) => {
+              console.log("room created", roomId);
+              console.log("navigate to", `/session/host/${roomId}`);
+              navigate(`/session/host/${roomId}`);
+            });
+          } else {
             joinRoom(roomId);
-          });
+          }
         } else {
           // join room
           joinRoom(roomId);
@@ -154,7 +254,7 @@ const Session = () => {
     return () => {
       socket.emit("leaveRoom", roomId);
     };
-  }, [accountAuth.accessToken, isHost, joinRoom, socket, socketConnected]);
+  }, [accountAuth.accessToken, isHost, joinRoom, navigate, roomId, socket, socketConnected]);
 
   useEffect(() => {
     const onEnter = (e) => {
@@ -163,41 +263,68 @@ const Session = () => {
       }
     };
     const onWindowMouseEnter = (e) => {
-      setWindowOnFocus(true);
+      setMouseOnWindow(true);
     };
 
     const onWindowMouseLeave = (e) => {
-      setWindowOnFocus(false);
+      setMouseOnWindow(false);
+    };
+
+    const onFocus = () => {
+      setFocusOnWindow(true);
+    };
+
+    const onBlur = () => {
+      setFocusOnWindow(false);
     };
 
     window.addEventListener("keydown", onEnter);
-    window.addEventListener("mouseover", onWindowMouseEnter);
-    window.addEventListener("mouseout", onWindowMouseLeave);
+    document.body.addEventListener("mouseenter", onWindowMouseEnter);
+    document.body.addEventListener("mouseleave", onWindowMouseLeave);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
 
     return () => {
       window.removeEventListener("keydown", onEnter);
-      window.removeEventListener("mouseover", onWindowMouseEnter);
-      window.removeEventListener("mouseout", onWindowMouseLeave);
+      document.body.removeEventListener("mouseenter", onWindowMouseEnter);
+      document.body.removeEventListener("mouseleave", onWindowMouseLeave);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
     };
   }, []);
+
+  useEffect(() => {
+    if (isHost) {
+      requestPermission({ screen: true });
+    }
+  }, [isHost]);
 
   return (
     <div className="session page">
       <div className="stream-area">
         <video ref={videoRef} id="stream_video" autoPlay playsInline muted={isHost} />
+        {inactive && (
+          <div className="idle-overlay">
+            <div className="text">스트리머는 리소스 절약을 위해 송출 화면 못봄</div>
+          </div>
+        )}
       </div>
-      <div className={"title-wrapper show-on-focus" + JsxUtil.classByCondition(windowOnFocus, "show")}>
+      <div className={"title-wrapper show-on-focus" + JsxUtil.classByCondition(mouseOnWindow, "show")}>
         <div className="title">방송 제목</div>
+        <div className="constraints">
+          {videoConstraints.width}x{videoConstraints.height} {videoConstraints.frameRate}FPS
+        </div>
+        <div className="watchers">{watchers.length}명이 보고있음</div>
         <div className="room-id" onClick={copyCode}>
           <IoCopy />
-          <span className="id">{roomId}</span>
+          <span className="id">코드 {roomId}</span>
         </div>
       </div>
       <div className={"chat-area" + JsxUtil.classByCondition(showChat, "show")}>
         <div className="chat-wrapper">
           <div className="chats">
             {chats.map((chat, index) => (
-              <div key={index} className="chat">
+              <div key={index} className={"chat" + JsxUtil.classByEqual(chat.uid, "system", "system")}>
                 <span className="nickname" style={{ color: generateRandomColor(chat.nickname) }}>
                   {chat.nickname}
                 </span>
@@ -220,12 +347,9 @@ const Session = () => {
               }
             }}
           />
-          {/* <div className="send">
-            <IoSendSharp />
-          </div> */}
         </div>
       </div>
-      <div className={"controllers show-on-focus" + JsxUtil.classByCondition(windowOnFocus, "show")}>
+      <div className={"controllers show-on-focus" + JsxUtil.classByCondition(mouseOnWindow, "show")}>
         <TooltipDiv tooltip={"채팅 보이기/가리기"}>
           <div className="controller chat-toggle" onClick={toggleChat}>
             <IoChatbubbleEllipses />
@@ -235,7 +359,7 @@ const Session = () => {
           </div>
         </TooltipDiv>
         {isHost && (
-          <TooltipDiv tooltip={"스크린 공유"}>
+          <TooltipDiv tooltip={"스크린 공유/창 변경"}>
             <div className="controller big screen-share" onClick={startScreenShare}>
               <IoPlay />
             </div>
@@ -246,9 +370,44 @@ const Session = () => {
             <IoClose />
           </div>
         </TooltipDiv>
-        <TooltipDiv tooltip={"감정표현"}>
-          <div className="controller emote">
-            <IoHappy />
+        {isHost && (
+          <TooltipDiv tooltip={"방송 설정"}>
+            <div className="controller big settings" onClick={floatSettings}>
+              <IoSettingsSharp />
+            </div>
+          </TooltipDiv>
+        )}
+        <TooltipDiv tooltip={"링크 복사"}>
+          <div className="controller copy-link" onClick={copyLink}>
+            <IoLink />
+          </div>
+        </TooltipDiv>
+      </div>
+      <div className={"sub-controllers"}>
+        <div
+          className={"sub-controller volume" + JsxUtil.classByCondition(volumeHovered, "hovered")}
+          onMouseEnter={(e) => setVolumeHovered(true)}
+          onMouseLeave={(e) => setVolumeHovered(false)}
+          onClick={(e) => setMuted((p) => !p)}
+        >
+          {muted ? (
+            <IoVolumeMute />
+          ) : volume > 80 ? (
+            <IoVolumeHigh />
+          ) : volume > 40 ? (
+            <IoVolumeMedium />
+          ) : volume > 0 ? (
+            <IoVolumeLow />
+          ) : (
+            <IoVolumeMute />
+          )}
+          <div className="volume-bar">
+            <VolumeSlider onChange={(v) => setVolume(v)} disabled={muted} />
+          </div>
+        </div>
+        <TooltipDiv tooltip={fullScreenMode ? "창 모드" : "전체 화면"}>
+          <div className="sub-controller fullscreen" onClick={toggleScreenMode}>
+            <IoScan />
           </div>
         </TooltipDiv>
       </div>

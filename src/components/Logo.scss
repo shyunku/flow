@@ -1,6 +1,22 @@
 .logo-default {
-  font-size: 128px;
+  display: flex;
+  flex-direction: column;
   font-weight: bold;
   color: rgb(214, 126, 97);
   cursor: pointer;
+  align-items: center;
+
+  .title {
+    font-size: 128px;
+
+    &:hover {
+      color: rgb(235, 140, 108);
+    }
+  }
+
+  .version {
+    font-size: 18px;
+    opacity: 0.5;
+    margin-top: 5px;
+  }
 }

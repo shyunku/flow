@@ -10,7 +10,7 @@ const MainRouter = () => {
     <HashRouter>
       <Routes>
         <Route element={<AuthRouter />}>
-          <Route path="/session/host" element={<Session />} />
+          <Route path="/session/host/:id?" element={<Session />} />
           <Route path="/session/watch/:id" element={<Session />} />
         </Route>
         <Route path="/" element={<Home />} />

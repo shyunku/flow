@@ -1,9 +1,17 @@
-import { Modaler } from "../molecules/Modal";
+import StreamSettings from "modals/StreamSettings";
+import Modal, { Modaler } from "../molecules/Modal";
 
-export const MODAL_TYPES = {};
+export const ModalTypes = {
+  EXAMPLE: "example",
+  STREAM_SETTINGS: "stream_settings",
+};
 
 const ModalRouter = () => {
-  return <Modaler></Modaler>;
+  return (
+    <Modaler>
+      <StreamSettings id={ModalTypes.STREAM_SETTINGS} />
+    </Modaler>
+  );
 };
 
 export default ModalRouter;

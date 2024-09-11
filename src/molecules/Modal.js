@@ -1,26 +1,44 @@
-import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-} from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import "./Modal.scss";
 import { sendEvent, uuidv4 } from "../utils/Common";
 import { IoClose } from "react-icons/io5";
 
+/**
+ * @param {object} props
+ * @param {string} props.id
+ * @param {boolean} props.active
+ * @param {function} props.onOpen
+ * @param {function} props.onClose
+ * @param {function} props.onCancel
+ * @param {function} props.beforeClose
+ * @param {string} props.className
+ */
 const Modal = forwardRef(
-  ({ children, id, active, onClose, onCancel, className, ...rest }, ref) => {
+  ({ children, id, active, onOpen, onClose, onCancel, beforeClose, className, ...rest }, ref) => {
     const modalRef = useRef(null);
-    const closeHandler = async () => {
+    const [onOpenCabllback, setOnOpenCallback] = useState(null);
+
+    const openHandler = useCallback(
+      (e) => {
+        const callback = onOpen?.(e.data);
+        setOnOpenCallback(() => callback);
+      },
+      [onOpen]
+    );
+
+    const closeHandler = async (...args) => {
       const modalElem = modalRef.current;
       if (!modalElem) return;
-      console.log(modalElem);
+      if (beforeClose) {
+        if ((await beforeClose?.(...args)) === false) return;
+      }
       const modalUuid = modalElem.getAttribute("data-uuid");
       if (!modalUuid) return;
       const modalCloseTopic = `modal_close_signal_${modalUuid}`;
+
       let data = await onClose?.();
       sendEvent(modalCloseTopic, data);
+      onOpenCabllback?.();
     };
 
     const cancelHandler = async () => {
@@ -37,10 +55,18 @@ const Modal = forwardRef(
     useImperativeHandle(ref, () => ({
       close: closeHandler,
       cancel: cancelHandler,
+      // handleModalOpen,
     }));
 
+    useEffect(() => {
+      document.addEventListener(`modal_opened_${id}`, openHandler);
+      return () => {
+        document.removeEventListener(`modal_opened_${id}`, openHandler);
+      };
+    }, []);
+
     return (
-      <div className={"modal"} id={`modal-${id}`} ref={modalRef} {...rest}>
+      <div className={"modal-frame"} id={`modal_${id}`} ref={modalRef} {...rest}>
         <div className={"modal-back-panel"} onClick={cancelHandler}></div>
         <div className={"modal-content " + className}>
           <>
@@ -58,21 +84,22 @@ const Modal = forwardRef(
 export const Modaler = ({ children }) => {
   const [activeModals, setActiveModals] = useState({});
   const [closeListeners, setCloseListeners] = useState({});
+  const modalElements = useMemo(() => {
+    return Array.isArray(children) ? children : [children];
+  }, [children]);
 
   useEffect(() => {
     const openListener = (e) => {
       const modalData = e.data;
-      const { modalId, uuid, modalCloseTopic } = modalData;
-      const realModalId = `modal-${modalId}`;
+      const { modalId, uuid, data: innerData, modalCloseTopic } = modalData;
+      const realModalId = `modal_${modalId}`;
       // check if modal is already opened
       if (activeModals[modalId]) {
         console.log(`Modal with id ${modalId} is already opened.`);
         return;
       }
 
-      const targetModalElement = document.querySelector(
-        `.modal#${realModalId}`
-      );
+      const targetModalElement = document.querySelector(`.modal-frame#${realModalId}`);
       if (!targetModalElement) {
         console.error(`Modal with id ${modalId} not found.`);
         return;
@@ -84,6 +111,10 @@ export const Modaler = ({ children }) => {
       setActiveModals((prev) => {
         return { ...prev, [modalId]: uuid };
       });
+
+      const openEvent = new Event(`modal_opened_${modalId}`, { bubbles: true });
+      openEvent.data = innerData;
+      document.dispatchEvent(openEvent);
 
       const closeSignalId = `modal_close_signal_${uuid}`;
       const closeListener = (e2) => {
@@ -117,24 +148,22 @@ export const Modaler = ({ children }) => {
       document.removeEventListener("open_modal", openListener);
       Object.keys(closeListeners).forEach((modalId) => {
         const closeListener = closeListeners[modalId];
-        document.removeEventListener(
-          `modal_close_signal_${modalId}`,
-          closeListener
-        );
+        document.removeEventListener(`modal_close_signal_${modalId}`, closeListener);
       });
     };
-  }, [activeModals]);
+  }, [activeModals, closeListeners]);
 
-  return <div className={"modal-container"}>{children}</div>;
+  return <div className={"modal-container"}>{modalElements}</div>;
 };
 
-export const openModal = (modalId, closeHandler = null) => {
+export const openModal = (modalId, data, closeHandler = null) => {
   const modalUuid = uuidv4();
   const modalCloseTopic = `modal_close_${modalUuid}`;
   sendEvent("open_modal", {
     modalId,
     uuid: modalUuid,
     modalCloseTopic,
+    data,
   });
   const onModalClose = (e) => {
     const retData = e.data;

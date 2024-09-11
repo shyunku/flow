@@ -1,0 +1,55 @@
+.volume-slider-wrapper {
+  position: absolute;
+  display: flex;
+  padding-bottom: 10px;
+  bottom: calc(100%);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.volume-slider-container {
+  position: relative;
+  width: 10px; /* 슬라이더 컨테이너의 너비 설정 */
+  height: 150px; /* 슬라이더 컨테이너의 높이 설정 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px; /* 슬라이더 내부 여백 */
+  background-color: #2e2e2e; /* 슬라이더 배경 색 */
+  border-radius: 10px; /* 슬라이더 컨테이너의 모서리 둥글게 */
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); /* 슬라이더 그림자 */
+}
+
+.volume-slider {
+  display: flex;
+  width: 150px; /* 슬라이더 너비 (세로 상태일 때는 높이처럼 적용) */
+  height: 10px; /* 슬라이더 높이 (세로 상태일 때는 너비처럼 적용) */
+  transform: rotate(-90deg); /* 슬라이더를 90도 회전하여 세로로 만듦 */
+  appearance: none; /* 기본 브라우저 스타일 제거 */
+  // background-color: transparent; /* 배경색 투명 설정 */
+  outline: none; /* 포커스 시 아웃라인 제거 */
+  z-index: 2;
+
+  &:disabled {
+    cursor: not-allowed; /* 비활성화 시 커서 스타일 변경 */
+    opacity: 0.5;
+  }
+}
+
+.volume-slider::-webkit-slider-thumb {
+  appearance: none; /* 기본 브라우저 스타일 제거 */
+  width: 16px; /* 슬라이더 손잡이 너비 */
+  height: 16px; /* 슬라이더 손잡이 높이 */
+  background-color: #ff9743; /* 슬라이더 손잡이 색상 */
+  border-radius: 50%; /* 손잡이 모양을 둥글게 */
+  cursor: pointer; /* 커서 스타일 */
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.2); /* 슬라이더 손잡이 그림자 */
+  transform: translateY(-25%); /* 슬라이더 손잡이를 수직 중앙으로 이동 */
+}
+
+.volume-slider::-webkit-slider-runnable-track {
+  width: 100%; /* 트랙 너비 */
+  height: 8px; /* 트랙 높이 */
+  background-color: #898989; /* 슬라이더 트랙 색상 */
+  border-radius: 4px; /* 트랙 모서리 둥글게 */
+}
