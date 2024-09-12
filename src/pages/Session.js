@@ -32,12 +32,14 @@ import VolumeSlider from "molecules/VolumeSlider";
 import Modal, { Modaler, openModal } from "molecules/Modal";
 import { ModalTypes } from "routers/ModalRouter";
 import { requestPermission } from "utils/Permission";
+import Prompt from "molecules/Prompt";
 
 const Session = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { id: roomId } = useParams();
   const isHost = location.pathname.includes("/session/host");
+  const accountAuth = useSelector(accountAuthSlice);
   // const [roomId, setRoomId] = useState(paramRoomId);
 
   const inputRef = useRef(null);
@@ -45,7 +47,8 @@ const Session = () => {
   const [chatInput, setChatInput] = useState("");
   const [mouseOnWindow, setMouseOnWindow] = useState(true);
   const [focusOnWindow, setFocusOnWindow] = useState(document.visibilityState === "visible");
-  const accountAuth = useSelector(accountAuthSlice);
+
+  const [roomName, setRoomName] = useState("");
   const [showChat, setShowChat] = useState(true);
   const [lastSeenChatTime, setLastSeenChatTime] = useState(Date.now());
   const [watchers, setWatchers] = useState([]);
@@ -86,6 +89,30 @@ const Session = () => {
     }
     socket.emit("chat", roomId, content);
     setChatInput("");
+  };
+
+  const changeRoomName = async () => {
+    if (!isHost) {
+      return;
+    }
+
+    await Prompt.float("방제 변경", "새로운 방제 입력하셈", {
+      inputs: [
+        {
+          key: "name",
+          type: "text",
+          placeholder: "방제",
+        },
+      ],
+      onConfirm: ({ name: raw }) => {
+        const name = raw.trim();
+        if (name.length === 0) {
+          Toast.warn("적고 확인눌러라");
+          return;
+        }
+        socket?.emit("setRoomName", roomId, name);
+      },
+    });
   };
 
   const toggleChat = () => {
@@ -165,11 +192,12 @@ const Session = () => {
         } else {
           console.log("room join failed", roomId);
           Toast.error("그런 방은 없음. 코드 확인하셈");
+          finalize();
           navigate("/");
         }
       });
     },
-    [socket, navigate]
+    [socket, finalize, navigate]
   );
 
   useEffect(() => {
@@ -195,7 +223,7 @@ const Session = () => {
 
     const onJoin = ({ uid, nickname }) => {
       addChat({ uid: "system", nickname: "System", content: `${nickname} 들어옴`, time: Date.now() });
-      setWatchers((prev) => [...prev, { uid, nickname }]);
+      if (uid !== accountAuth?.uid) setWatchers((prev) => [...prev, { uid, nickname }]);
     };
 
     const onLeave = ({ uid, nickname }) => {
@@ -207,16 +235,22 @@ const Session = () => {
       setWatchers(participants);
     };
 
+    const onRoomName = (name) => {
+      setRoomName(name);
+    };
+
     socket.on("chat", onChat);
     socket.on("userJoined", onJoin);
     socket.on("userLeft", onLeave);
     socket.on("participants", onParticipants);
+    socket.on("roomName", onRoomName);
 
     return () => {
       socket.off("chat", onChat);
       socket.off("userJoined", onJoin);
       socket.off("userLeft", onLeave);
       socket.off("participants", onParticipants);
+      socket.off("roomName", onRoomName);
     };
   }, [addChat, socket, socketConnected]);
 
@@ -338,11 +372,13 @@ const Session = () => {
         ) : null}
       </div>
       <div className={"title-wrapper show-on-focus" + JsxUtil.classByCondition(mouseOnWindow, "show")}>
-        <div className="title">방송 제목</div>
+        <div className={"title" + JsxUtil.classByCondition(isHost, "host")} onClick={changeRoomName}>
+          {roomName}
+        </div>
         <div className="constraints">
           {videoConstraints.width}x{videoConstraints.height} {videoConstraints.frameRate}FPS
         </div>
-        <div className="watchers">{watchers.length}명이 보고있음</div>
+        <div className="watchers">{watchers.filter((p) => p.uid !== accountAuth.uid).length}명이 보고있음</div>
         <div className="room-id" onClick={copyCode}>
           <IoCopy />
           <span className="id">코드 {roomId}</span>

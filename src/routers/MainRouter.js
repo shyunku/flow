@@ -4,6 +4,7 @@ import { HashRouter, Route, Routes } from "react-router-dom";
 import AuthRouter from "./AuthRouter";
 import Session from "pages/Session";
 import Signup from "pages/Signup";
+import SessionList from "pages/SessionList";
 
 const MainRouter = () => {
   return (
@@ -12,6 +13,7 @@ const MainRouter = () => {
         <Route element={<AuthRouter />}>
           <Route path="/session/host/:id?" element={<Session />} />
           <Route path="/session/watch/:id" element={<Session />} />
+          <Route path="/session/list" element={<SessionList />} />
         </Route>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />

@@ -43,6 +43,10 @@ const Home = () => {
     });
   };
 
+  const goToSessionList = () => {
+    navigate("/session/list");
+  };
+
   const logout = () => {
     dispatch(removeAuth());
   };
@@ -59,7 +63,10 @@ const Home = () => {
                 방송하기
               </div>
               <div className="watch" onClick={goToSessionWithWatching}>
-                방송보기
+                코드로 방송보기
+              </div>
+              <div className="watch" onClick={goToSessionList}>
+                방송 고르기
               </div>
               <div className="logout" onClick={logout}>
                 로그아웃

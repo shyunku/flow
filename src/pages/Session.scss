@@ -47,6 +47,15 @@
     align-items: flex-start;
     z-index: 10;
 
+    .title {
+      &.host {
+        cursor: pointer;
+        &:hover {
+          color: rgb(250, 165, 116);
+        }
+      }
+    }
+
     .constraints,
     .watchers {
       font-size: 12px;
