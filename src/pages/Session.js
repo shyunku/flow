@@ -192,12 +192,11 @@ const Session = () => {
         } else {
           console.log("room join failed", roomId);
           Toast.error("그런 방은 없음. 코드 확인하셈");
-          finalize();
           navigate("/");
         }
       });
     },
-    [socket, finalize, navigate]
+    [socket, navigate]
   );
 
   useEffect(() => {
